@@ -55,7 +55,7 @@ export default function Page() {
     <div className={"app" + (navOpen ? " nav-open" : "")}>
       <div className="backdrop" onClick={() => setNavOpen(false)} />
       <aside className="col sidebar">
-        <div className="brand"><div className="logo" /><div><h1>BLURUM</h1><div className="tag">Lounge · Base</div></div></div>
+        <div className="brand"><img src="/logo.png" alt="BLURUM" style={{ width: 38, height: 38, borderRadius: 12, objectFit: "cover", boxShadow: "var(--glow)" }} /><div><h1>BLURUM</h1><div className="tag">Lounge · Base</div></div></div>
         <nav className="nav">
           {NAV.map((n) => (
             <div key={n.id} className={"navi" + (view === n.id ? " active" : "")} onClick={() => { setView(n.id); setNavOpen(false); }}>
