@@ -394,28 +394,53 @@ async function walletConnectProvider(){
   });
   return _wcp;
 }
+const KNOWN=[
+  {name:"MetaMask", rdns:"io.metamask", color:"#f6851b", initials:"M", url:"https://metamask.io/download/"},
+  {name:"Rabby Wallet", rdns:"io.rabby", color:"#7084ff", initials:"R", url:"https://rabby.io/"},
+];
+function detectedByRdns(rdns){ return injectedWallets.find(w=>w.info&&w.info.rdns===rdns); }
+function matchInjected(rdns){
+  if(typeof window==="undefined")return null; const e=window.ethereum; if(!e)return null;
+  const arr=(e.providers&&Array.isArray(e.providers))?e.providers:[e];
+  if(rdns==="io.rabby")    return arr.find(p=>p&&p.isRabby)||null;
+  if(rdns==="io.metamask") return arr.find(p=>p&&p.isMetaMask&&!p.isRabby)||null;
+  return null;
+}
+function walletRow(name,badge,iconHTML,onClick){ const b=document.createElement("button"); b.className="wopt"; b.innerHTML=`${iconHTML}<span>${esc(name)}</span>${badge?`<span class="badge">${badge}</span>`:""}`; b.onclick=onClick; return b; }
 function buildWalletList(){
   const list=$("#walletList"); if(!list)return; list.innerHTML="";
-  injectedWallets.forEach(w=>{ const b=document.createElement("button"); b.className="wopt";
-    b.innerHTML=`<img src="${w.info.icon}" alt="" onerror="this.outerHTML='<div class=\\'wic\\'>\u{1F45B}</div>'"/><span>${esc(w.info.name)}</span><span class="badge">detected</span>`;
-    b.onclick=()=>connectWith(w.provider,"eoa",w.info.name); list.appendChild(b); });
-  const cb=document.createElement("button"); cb.className="wopt";
-  cb.innerHTML=`<div class="wic" style="background:#2151f5">CB</div><span>Coinbase Smart Wallet</span><span class="badge">passkey</span>`;
-  cb.onclick=async()=>{ try{ const p=await coinbaseProvider(); connectWith(p,"scw","Coinbase Smart Wallet"); }catch(_){ toast("Coinbase Wallet unavailable","⚠️"); } };
-  list.appendChild(cb);
-  const wc=document.createElement("button"); wc.className="wopt";
-  wc.innerHTML=`<div class="wic" style="background:#3b99fc">WC</div><span>WalletConnect</span><span class="badge">QR · mobile</span>`;
-  wc.onclick=async()=>{
+  const seen=new Set();
+  // 1) wallets that announced themselves (EIP-6963): MetaMask, Rabby, Frame, ...
+  injectedWallets.forEach(w=>{ if(w.info&&w.info.rdns) seen.add(w.info.rdns);
+    list.appendChild(walletRow(w.info.name,"detected",`<img src="${w.info.icon}" alt="" onerror="this.style.display='none'"/>`,()=>connectWith(w.provider,"eoa",w.info.name))); });
+  // 2) curated popular wallets — ALWAYS visible (Rabby, MetaMask) if not already shown
+  KNOWN.forEach(k=>{ if(seen.has(k.rdns))return;
+    const inj=matchInjected(k.rdns); const badge=inj?"detected":"";
+    list.appendChild(walletRow(k.name,badge,`<div class="wic" style="background:${k.color}">${k.initials}</div>`,()=>{
+      const d=detectedByRdns(k.rdns); if(d){ connectWith(d.provider,"eoa",k.name); return; }
+      const p=matchInjected(k.rdns); if(p){ connectWith(p,"eoa",k.name); return; }
+      if(typeof window!=="undefined"&&window.ethereum){ connectWith(window.ethereum,"eoa",k.name); return; }
+      if(typeof location!=="undefined"&&location.protocol==="file:"){ toast(`Your wallet can’t connect on a file:// page. Run BlueRoom on a web address, then reload — see the note below.`,"⚠️"); const nw=$("#noWallet"); if(nw){ nw.style.display="block"; } return; }
+      toast(`${k.name} not detected — opening install page`,"ℹ️"); try{ window.open(k.url,"_blank"); }catch(_){}
+    }));
+  });
+  // 3) Coinbase Smart Wallet (always)
+  list.appendChild(walletRow("Coinbase Smart Wallet","passkey",`<div class="wic" style="background:#2151f5">CB</div>`,async()=>{ try{ const p=await coinbaseProvider(); connectWith(p,"scw","Coinbase Smart Wallet"); }catch(_){ toast("Coinbase Wallet unavailable","⚠️"); } }));
+  // 4) WalletConnect (always)
+  list.appendChild(walletRow("WalletConnect","QR · mobile",`<div class="wic" style="background:#3b99fc">WC</div>`,async()=>{
     if(!CONFIG.WALLETCONNECT_PROJECT_ID){ toast("Add a free WalletConnect projectId in CONFIG to enable QR / mobile sign-in","ℹ️"); return; }
     try{ const p=await walletConnectProvider(); if(p.connect) await p.connect(); connectWith(p,"eoa","WalletConnect"); }
     catch(e){ if((e&&e.message)!=="no-projectid"){ console.warn(e); toast("WalletConnect failed: "+(e&&e.message||e),"⚠️"); } }
-  };
-  list.appendChild(wc);
-  if(!injectedWallets.length && typeof window!=="undefined" && window.ethereum){ const b=document.createElement("button"); b.className="wopt";
-    b.innerHTML=`<div class="wic">\u{1F98A}</div><span>Browser wallet</span>`; b.onclick=()=>connectWith(window.ethereum,"eoa","Browser wallet"); list.appendChild(b); }
-  const nw=$("#noWallet"); if(nw) nw.style.display=(injectedWallets.length||(typeof window!=="undefined"&&window.ethereum))?"none":"block";
+  }));
+  // 5) legacy single-injected fallback
+  if(!injectedWallets.length && typeof window!=="undefined" && window.ethereum && !KNOWN.some(k=>matchInjected(k.rdns))){
+    list.appendChild(walletRow("Browser wallet","",`<div class="wic">\u{1F98A}</div>`,()=>connectWith(window.ethereum,"eoa","Browser wallet")));
+  }
+  const noProv=!injectedWallets.length && !(typeof window!=="undefined"&&window.ethereum);
+  const fileProto=(typeof location!=="undefined"&&location.protocol==="file:");
+  const nw=$("#noWallet"); if(nw){ if(fileProto){ nw.style.display="block"; nw.innerHTML="⚠️ You’re opening this as a file (file://). Browser wallets like MetaMask &amp; Rabby can’t connect here. Run BlueRoom on a web address &mdash; double-click <b>Start-BlueRoom-server.bat</b> in this folder, or drop the folder on <b>app.netlify.com/drop</b> &mdash; then reload."; } else if(noProv){ nw.style.display="block"; nw.innerHTML="No wallet detected. Install MetaMask or Rabby, or use Coinbase Smart Wallet / WalletConnect."; } else nw.style.display="none"; } 
 }
-function openConnect(){ buildWalletList(); $("#walletScrim").classList.add("open"); }
+function openConnect(){ try{ window.dispatchEvent(new Event("eip6963:requestProvider")); }catch(_){} buildWalletList(); $("#walletScrim").classList.add("open"); setTimeout(()=>{ if($("#walletScrim")&&$("#walletScrim").classList.contains("open")) buildWalletList(); },300); }
 function closeConnect(){ const s=$("#walletScrim"); if(s)s.classList.remove("open"); }
 function connectWallet(){ openConnect(); }
 async function connectWith(provider, kind, label){
@@ -709,6 +734,7 @@ function closeNav(){ $("#app").classList.remove("nav-open"); }
 
 function renderAll(){ renderWallet(); renderChat(); if(state.view==="agents")renderAgents(); if(state.view==="profile")renderProfile(); }
 loadProfile(); setStatus("idle","not connected"); renderAll();
+if(typeof location!=="undefined"&&location.protocol==="file:"){ setTimeout(()=>toast("Heads up: you’re on a file:// page so wallets can’t connect. Host it (Netlify Drop) or run Start-BlueRoom-server.bat, then reload.","⚠️"),900); }
 console.log("%cBlueRoom","color:#3a7bff;font-weight:800;font-size:16px"," ready · set CONFIG.GENERAL_GROUP_ID to share one #general across all users.");
 </script>
 </body>
