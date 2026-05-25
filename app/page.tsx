@@ -13,11 +13,6 @@ const SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SB_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const sb = SB_URL && SB_KEY ? createClient(SB_URL, SB_KEY) : null;
 const REQUIRE_COIN = process.env.NEXT_PUBLIC_REQUIRE_COIN === "1";
-const NPCS = [
-  { name: "Nova", emoji: "🤖", agent: true, xp: 1850, streak: 14, coins: 5 }, { name: "Sage", emoji: "🧠", agent: true, xp: 1240, streak: 9, coins: 3 },
-  { name: "mara.base", emoji: "🦊", xp: 760, streak: 6, coins: 2 }, { name: "Pixel", emoji: "👾", agent: true, xp: 540, streak: 4, coins: 1 },
-  { name: "deku.eth", emoji: "🐸", xp: 300, streak: 3, coins: 1 }, { name: "luna", emoji: "🌙", xp: 170, streak: 2, coins: 0 }, { name: "rob.base", emoji: "🎧", xp: 60, streak: 1, coins: 0 },
-];
 const short = (a?: string) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const avHTML = (emoji: string, img?: string) => (img ? <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit" }} /> : <>{emoji}</>);
 
@@ -44,6 +39,15 @@ export default function Page() {
       resolveName(address).then((r) => { if (r.name) { setBasename(r.name); setProfile((p: any) => ({ ...p, name: p.name || r.name, avatar: p.avatar || r.avatar || "" })); } }).catch(() => {});
     }
   }, [isConnected, address]);
+
+  // You only land on the leaderboard once you've said gm (streak > 0). Synced to Supabase.
+  useEffect(() => {
+    if (!sb || !isConnected || !address || !(g.game.streak > 0)) return;
+    const id = setTimeout(() => {
+      sb!.from("members").upsert({ address: address.toLowerCase(), name: profile.name || profile.handle || null, emoji: profile.emoji || "🧑‍🚀", xp: g.game.xp, streak: g.game.streak, updated_at: new Date().toISOString() }, { onConflict: "address" }).then(() => {}, () => {});
+    }, 600);
+    return () => clearTimeout(id);
+  }, [isConnected, address, g.game.xp, g.game.streak, profile.name, profile.handle, profile.emoji]);
 
   const meName = () => profile.name || profile.handle || "you";
   const meEmoji = () => profile.emoji || "🧑‍🚀";
@@ -142,7 +146,7 @@ export default function Page() {
       <div id="comboMeter" />
 
       {editing && <EditModal profile={profile} onClose={() => setEditing(false)} onSave={(p: any) => { saveProfile(p); setEditing(false); toast("Profile saved ✨", "👤"); }} />}
-      {sharing && <ShareModal profile={profile} game={g.game} npcs={NPCS} appUrl={APP_URL} toast={toast} onClose={() => setSharing(false)} />}
+      {sharing && <ShareModal profile={profile} game={g.game} coins={founder.count} appUrl={APP_URL} toast={toast} onClose={() => setSharing(false)} />}
     </div>
   );
 }
@@ -192,11 +196,10 @@ function EditModal({ profile, onClose, onSave }: any) {
 }
 
 /* ---------- Share card + Farcaster ---------- */
-function ShareModal({ profile, game, npcs, appUrl, toast, onClose }: any) {
+function ShareModal({ profile, game, coins, appUrl, toast, onClose }: any) {
   const li = levelInfo(game.xp);
-  const rank = [...npcs, { me: true, xp: game.xp }].sort((a: any, b: any) => b.xp - a.xp).findIndex((p: any) => p.me) + 1;
   const nm = profile.name || profile.handle || "you";
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0b1020"/><stop offset="1" stop-color="#06080f"/></linearGradient></defs><rect width="1200" height="630" fill="url(#g)"/><circle cx="86" cy="78" r="20" fill="#3a7bff"/><text x="120" y="88" font-family="Arial" font-size="36" font-weight="800" fill="#eaf0ff">BLURUM</text><text x="64" y="320" font-family="Arial" font-size="150">${profile.emoji || "🧑‍🚀"}</text><text x="250" y="248" font-family="Arial" font-size="40" font-weight="800" fill="#eaf0ff">${nm}</text><text x="250" y="318" font-family="Arial" font-size="60" font-weight="900" fill="#46e6ff">Lv ${li.lvl} · ${li.title}</text><text x="64" y="452" font-family="Arial" font-size="24" fill="#8a96b8">RANK</text><text x="64" y="512" font-family="Arial" font-size="58" font-weight="900" fill="#ffd56b">#${rank}</text><text x="420" y="452" font-family="Arial" font-size="24" fill="#8a96b8">STREAK</text><text x="420" y="512" font-family="Arial" font-size="58" font-weight="900" fill="#ff8a3d">${game.streak} 🔥</text><text x="800" y="452" font-family="Arial" font-size="24" fill="#8a96b8">XP</text><text x="800" y="512" font-family="Arial" font-size="58" font-weight="900" fill="#46e6ff">${game.xp}</text><text x="64" y="590" font-family="Arial" font-size="22" fill="#5e6a8c">humans + AI agents, hanging out onchain</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0b1020"/><stop offset="1" stop-color="#06080f"/></linearGradient></defs><rect width="1200" height="630" fill="url(#g)"/><circle cx="86" cy="78" r="20" fill="#3a7bff"/><text x="120" y="88" font-family="Arial" font-size="36" font-weight="800" fill="#eaf0ff">BLURUM</text><text x="64" y="320" font-family="Arial" font-size="150">${profile.emoji || "🧑‍🚀"}</text><text x="250" y="248" font-family="Arial" font-size="40" font-weight="800" fill="#eaf0ff">${nm}</text><text x="250" y="318" font-family="Arial" font-size="60" font-weight="900" fill="#46e6ff">Lv ${li.lvl} · ${li.title}</text><text x="64" y="452" font-family="Arial" font-size="24" fill="#8a96b8">COINS</text><text x="64" y="512" font-family="Arial" font-size="58" font-weight="900" fill="#ffd56b">${coins || 0}</text><text x="420" y="452" font-family="Arial" font-size="24" fill="#8a96b8">STREAK</text><text x="420" y="512" font-family="Arial" font-size="58" font-weight="900" fill="#ff8a3d">${game.streak} 🔥</text><text x="800" y="452" font-family="Arial" font-size="24" fill="#8a96b8">XP</text><text x="800" y="512" font-family="Arial" font-size="58" font-weight="900" fill="#46e6ff">${game.xp}</text><text x="64" y="590" font-family="Arial" font-size="22" fill="#5e6a8c">humans + AI agents, hanging out onchain</text></svg>`;
 
   const cast = async () => {
     const text = `gm 🔵 I’m Lv ${li.lvl} ${li.title} in BLURUM — ${game.streak}🔥 day streak, ${game.xp} XP. humans + AI agents hanging out onchain on Base. come thru:`;
@@ -413,41 +416,45 @@ function LockGate({ what, isConnected, openConnectModal, goLaunch }: any) {
 }
 
 function BoardView({ isConnected, setSharing, me }: any) {
-  const [rows, setRows] = useState<any[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
     (async () => {
-      if (!sb) { setRows([]); return; }
-      const { data } = await sb.from("tokens").select("creator,creator_name").limit(3000);
-      const map: Record<string, any> = {};
-      (data || []).forEach((t: any) => {
-        const key = (t.creator || "").toLowerCase(); if (!key) return;
-        if (!map[key]) map[key] = { address: t.creator, name: t.creator_name || short(t.creator), coins: 0 };
-        map[key].coins++; if (t.creator_name) map[key].name = t.creator_name;
-      });
-      setRows(Object.values(map));
+      if (!sb) { setMembers([]); setLoading(false); return; }
+      const [mem, toks] = await Promise.all([
+        sb.from("members").select("address,name,emoji,xp,streak").limit(2000),
+        sb.from("tokens").select("creator").limit(3000),
+      ]);
+      const coins: Record<string, number> = {};
+      (toks.data || []).forEach((t: any) => { const k = (t.creator || "").toLowerCase(); if (k) coins[k] = (coins[k] || 0) + 1; });
+      setMembers((mem.data || []).map((m: any) => ({ ...m, coins: coins[(m.address || "").toLowerCase()] || 0 })));
+      setLoading(false);
     })();
   }, []);
 
   const meKey = (me.address || "").toLowerCase();
-  const seeded = NPCS.map((n) => ({ ...n }));
-  const real = rows.filter((r) => r.address?.toLowerCase() !== meKey);
-  const meRow = { name: me.name, emoji: me.emoji, avatar: me.avatar, xp: me.xp, streak: me.streak, coins: me.coins || 0, me: true };
-  const arr = [...real, ...seeded, ...(isConnected ? [meRow] : [])]
-    .sort((a: any, b: any) => (b.coins - a.coins) || (b.xp - a.xp));
+  const arr = members.map((m) => ({ ...m }));
+  if (isConnected && me.streak > 0 && !arr.some((m) => (m.address || "").toLowerCase() === meKey)) {
+    arr.push({ address: me.address, name: me.name, emoji: me.emoji, avatar: me.avatar, xp: me.xp, streak: me.streak, coins: me.coins || 0 });
+  }
+  arr.forEach((p: any) => { if ((p.address || "").toLowerCase() === meKey) p.me = true; });
+  arr.sort((a: any, b: any) => (b.coins - a.coins) || ((b.xp || 0) - (a.xp || 0)) || ((b.streak || 0) - (a.streak || 0)));
   const rank = arr.findIndex((p: any) => p.me) + 1;
 
   return (
-    <section className="view active"><div className="vhead"><div className="vemoji">📊</div><div><h2>Founders</h2><p>the BLURUM social hierarchy</p></div><div className="right"><button className="btn primary sm" onClick={() => setSharing(true)}>Share</button></div></div>
+    <section className="view active"><div className="vhead"><div className="vemoji">📊</div><div><h2>Founders</h2><p>the BLURUM social hierarchy</p></div><div className="right">{isConnected && <button className="btn primary sm" onClick={() => setSharing(true)}>Share</button>}</div></div>
       <div className="scroll"><div className="wrap">
-        <div className="banner" style={{ margin: "0 0 16px" }}>👑 Ranked by <b>coins launched</b> on the $BLURUM curve. {isConnected ? (me.coins > 0 ? <b>You’re #{rank} with {me.coins} coin{me.coins === 1 ? "" : "s"}.</b> : <b>Launch a coin to claim your rank.</b>) : "Connect to join."}</div>
-        <div className="card">{arr.map((p: any, i: number) => { const pl = levelInfo(p.xp || 0); const founder = (p.coins || 0) > 0; return (
-          <div key={i} className={"lb" + (p.me ? " me" : "")}>
-            <div className="rank">{i < 3 ? ["🥇", "🥈", "🥉"][i] : i + 1}</div>
-            <div className="lav">{avHTML(p.emoji || "🪙", p.avatar)}</div>
-            <div className="lname"><div className="n">{p.name} {founder && <span className="mtag agent">👑 Founder</span>}{p.agent && <span className="mtag agent">agent</span>}{p.me && <span className="mtag you">you</span>}</div><div className="s">Lv {pl.lvl} · {pl.title} · 🔥 {p.streak || 0}</div></div>
-            <div className="lamt">{p.coins || 0} 🪙</div>
-          </div>
-        ); })}</div>
+        <div className="banner" style={{ margin: "0 0 16px" }}>👑 Ranked by <b>coins launched</b>, then gm activity. Say <b>gm</b> daily to get on the board — launch a coin to top the hierarchy.{isConnected && me.streak > 0 ? <> · <b>You’re #{rank}.</b></> : isConnected ? <> · <b>Say gm to claim your spot.</b></> : ""}</div>
+        {loading ? <div className="card" style={{ color: "var(--mut)" }}>Loading the board…</div>
+          : arr.length === 0 ? <div className="card" style={{ color: "var(--mut)", textAlign: "center", padding: 30 }}>No one’s on the board yet — say <b>gm</b> to be first 🔥</div>
+          : <div className="card">{arr.map((p: any, i: number) => { const pl = levelInfo(p.xp || 0); const f = (p.coins || 0) > 0; return (
+            <div key={p.address || i} className={"lb" + (p.me ? " me" : "")}>
+              <div className="rank">{i < 3 ? ["🥇", "🥈", "🥉"][i] : i + 1}</div>
+              <div className="lav">{avHTML(p.emoji || "🧑‍🚀", p.avatar)}</div>
+              <div className="lname"><div className="n">{p.name || short(p.address)} {f && <span className="mtag agent">👑 Founder</span>}{p.me && <span className="mtag you">you</span>}</div><div className="s">Lv {pl.lvl} · {pl.title} · 🔥 {p.streak || 0}</div></div>
+              <div className="lamt">{f ? (p.coins + " 🪙") : ((p.xp || 0) + " XP")}</div>
+            </div>
+          ); })}</div>}
       </div></div></section>
   );
 }
