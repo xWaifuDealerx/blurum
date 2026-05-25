@@ -298,10 +298,20 @@ function LaunchModal({ address, profile, toast, onClose, onLaunched }: any) {
     if (!BLURUM_TOKEN) { toast("Launching opens when $BLURUM is live", "⏳"); return; }
     setBusy(true);
     try {
-      // Loaded from CDN at runtime via new Function so the bundler never touches it (keeps jsdom out of the build).
+      // Loaded from CDN at runtime via new Function so the bundler never touches it.
+      // esm.sh "?bundle" returns ONE self-contained file, avoiding the SDK's broken
+      // multi-fetch dependency graph (its "ox" dep is pinned to a pkg.pr.new preview).
       const cdnImport = new Function("u", "return import(u)") as (u: string) => Promise<any>;
-      const mod: any = await cdnImport("https://esm.sh/mint.club-v2-sdk@1.5.6");
+      const urls = [
+        "https://esm.sh/mint.club-v2-sdk@1.5.6?bundle&target=es2020",
+        "https://cdn.jsdelivr.net/npm/mint.club-v2-sdk@1.5.6/+esm",
+        "https://esm.sh/mint.club-v2-sdk@1.5.6",
+      ];
+      let mod: any = null, lastErr: any = null;
+      for (const u of urls) { try { mod = await cdnImport(u); if (mod) break; } catch (err) { lastErr = err; } }
+      if (!mod) throw (lastErr || new Error("Could not load the Mint Club SDK from any CDN"));
       const mintclub = mod.mintclub || mod.default?.mintclub || mod.default;
+      if (!mintclub || !mintclub.network) throw new Error("Mint Club SDK loaded but its API was not found");
       await mintclub.network("base").token(symbol).create({
         name,
         reserveToken: { address: BLURUM_TOKEN, decimals: 18 },
