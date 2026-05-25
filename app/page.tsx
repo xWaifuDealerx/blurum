@@ -1,17 +1,22 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useSignMessage } from "wagmi";
 import { useConnectModal, useAccountModal } from "@rainbow-me/rainbowkit";
+import { createClient } from "@supabase/supabase-js";
 import Chat from "@/components/Chat";
-import { useXmtp } from "@/lib/useXmtp";
 import { useGame, levelInfo, DAILY, ONBOARD } from "@/lib/game";
 import { resolveName } from "@/lib/names";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://blurum.xyz";
+const BLURUM_TOKEN = process.env.NEXT_PUBLIC_BLURUM_TOKEN || "";
+const SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SB_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const sb = SB_URL && SB_KEY ? createClient(SB_URL, SB_KEY) : null;
+const REQUIRE_COIN = process.env.NEXT_PUBLIC_REQUIRE_COIN === "1";
 const NPCS = [
-  { name: "Nova", emoji: "🤖", agent: true, xp: 1850, streak: 14 }, { name: "Sage", emoji: "🧠", agent: true, xp: 1240, streak: 9 },
-  { name: "mara.base", emoji: "🦊", xp: 760, streak: 6 }, { name: "Pixel", emoji: "👾", agent: true, xp: 540, streak: 4 },
-  { name: "deku.eth", emoji: "🐸", xp: 300, streak: 3 }, { name: "luna", emoji: "🌙", xp: 170, streak: 2 }, { name: "rob.base", emoji: "🎧", xp: 60, streak: 1 },
+  { name: "Nova", emoji: "🤖", agent: true, xp: 1850, streak: 14, coins: 5 }, { name: "Sage", emoji: "🧠", agent: true, xp: 1240, streak: 9, coins: 3 },
+  { name: "mara.base", emoji: "🦊", xp: 760, streak: 6, coins: 2 }, { name: "Pixel", emoji: "👾", agent: true, xp: 540, streak: 4, coins: 1 },
+  { name: "deku.eth", emoji: "🐸", xp: 300, streak: 3, coins: 1 }, { name: "luna", emoji: "🌙", xp: 170, streak: 2, coins: 0 }, { name: "rob.base", emoji: "🎧", xp: 60, streak: 1, coins: 0 },
 ];
 const short = (a?: string) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const avHTML = (emoji: string, img?: string) => (img ? <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit" }} /> : <>{emoji}</>);
@@ -22,7 +27,6 @@ export default function Page() {
   const { openAccountModal } = useAccountModal();
   const [toasts, setToasts] = useState<any[]>([]);
   const toast = useCallback((html: string, emoji?: string) => { const id = Math.random(); setToasts((t) => [...t, { id, html, emoji }]); setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2700); }, []);
-  const xmtp = useXmtp(toast);
   const g = useGame(address, toast);
   const [view, setView] = useState("general");
   const [navOpen, setNavOpen] = useState(false);
@@ -44,9 +48,11 @@ export default function Page() {
   const meName = () => profile.name || profile.handle || "you";
   const meEmoji = () => profile.emoji || "🧑‍🚀";
   const li = levelInfo(g.game.xp);
+  const founder = useFounder(address);
+  const locked = REQUIRE_COIN && !(isConnected && founder.launched);
 
   const NAV = [
-    { id: "general", ic: "💬", label: "General" }, { id: "agents", ic: "🤖", label: "Agents" },
+    { id: "general", ic: "💬", label: "General" }, { id: "agents", ic: "🤖", label: "Agents" }, { id: "launch", ic: "🚀", label: "Launchpad" },
     { id: "quests", ic: "🎯", label: "Quests" }, { id: "board", ic: "📊", label: "Leaderboard" },
     { id: "trophies", ic: "🏆", label: "Trophies", soon: true }, { id: "profile", ic: "👤", label: "Profile" },
   ];
@@ -84,11 +90,16 @@ export default function Page() {
       <main className="col main">
         <button className="menu-btn" style={{ position: "absolute", margin: 12, zIndex: 5 }} onClick={() => setNavOpen(true)}>☰</button>
 
-        {view === "general" && <Chat xmtp={xmtp} profile={profile} onMessage={g.onMessage} onReact={g.onReact} toast={toast} />}
+        {view === "general" && !locked && <Chat profile={profile} onMessage={g.onMessage} onReact={g.onReact} toast={toast} />}
+        {view === "general" && locked && <LockGate what="#general" isConnected={isConnected} openConnectModal={openConnectModal} goLaunch={() => setView("launch")} />}
 
-        {view === "agents" && <AgentsView xmtp={xmtp} isConnected={isConnected} openConnectModal={openConnectModal} onAdded={() => g.awardOnce("agent", 20)} />}
+        {view === "agents" && <AgentsView isConnected={isConnected} openConnectModal={openConnectModal} />}
 
-        {view === "quests" && (
+        {view === "launch" && <LaunchpadView address={address} isConnected={isConnected} openConnectModal={openConnectModal} profile={profile} toast={toast} canComment={!REQUIRE_COIN || founder.launched} onFounderRefresh={founder.refresh} />}
+
+        {view === "quests" && locked && <LockGate what="Quests" isConnected={isConnected} openConnectModal={openConnectModal} goLaunch={() => setView("launch")} />}
+
+        {view === "quests" && !locked && (
           <section className="view active"><div className="vhead"><div className="vemoji">🎯</div><div><h2>Quests</h2><p>complete tasks, earn XP</p></div></div>
             <div className="scroll"><div className="wrap">
               {!isConnected ? <div className="card" style={{ textAlign: "center", padding: 34 }}><p style={{ color: "var(--mut)" }}>Connect to earn XP from quests.</p><button className="btn primary" onClick={openConnectModal}>Connect Wallet</button></div> : <>
@@ -101,15 +112,7 @@ export default function Page() {
             </div></div></section>
         )}
 
-        {view === "board" && (
-          <section className="view active"><div className="vhead"><div className="vemoji">📊</div><div><h2>Leaderboard</h2><p>top members by XP</p></div><div className="right"><button className="btn primary sm" onClick={() => setSharing(true)}>Share</button></div></div>
-            <div className="scroll"><div className="wrap">
-              {(() => { const arr = [...NPCS, { name: meName(), emoji: meEmoji(), avatar: profile.avatar, xp: isConnected ? g.game.xp : 0, streak: g.game.streak, me: true }].sort((a: any, b: any) => b.xp - a.xp); const rank = arr.findIndex((p: any) => p.me) + 1; return <>
-                <div className="banner" style={{ margin: "0 0 16px" }}>📊 Ranked by XP. {isConnected ? <b>You’re #{rank} of {arr.length}</b> : "Connect to join."}</div>
-                <div className="card">{arr.map((p: any, i: number) => { const pl = levelInfo(p.xp); return <div key={i} className={"lb" + (p.me ? " me" : "")}><div className="rank">{i < 3 ? ["🥇", "🥈", "🥉"][i] : i + 1}</div><div className="lav">{avHTML(p.emoji, p.avatar)}</div><div className="lname"><div className="n">{p.name} {p.agent && <span className="mtag agent">agent</span>}{p.me && <span className="mtag you">you</span>}</div><div className="s">Lv {pl.lvl} · {pl.title} · 🔥 {p.streak || 0}</div></div><div className="lamt">{p.xp} XP</div></div>; })}</div>
-              </>; })()}
-            </div></div></section>
-        )}
+        {view === "board" && <BoardView isConnected={isConnected} setSharing={setSharing} me={{ name: meName(), emoji: meEmoji(), avatar: profile.avatar, xp: isConnected ? g.game.xp : 0, streak: g.game.streak, coins: founder.count, address }} />}
 
         {view === "trophies" && (
           <section className="view active"><div className="vhead"><div className="vemoji">🏆</div><div><h2>Trophies</h2><p>community NFT awards</p></div></div>
@@ -122,13 +125,13 @@ export default function Page() {
               {!isConnected ? <div className="card" style={{ textAlign: "center", padding: 40 }}><div style={{ fontSize: 40 }}>👤</div><p style={{ color: "var(--mut)", margin: "12px 0 16px" }}>Connect your wallet to create your BLURUM profile.</p><button className="btn primary" onClick={openConnectModal}>Connect Wallet</button></div> : <>
                 <div className="pcover" /><div className="pcard">
                   <div className="pfp-lg">{avHTML(meEmoji(), profile.avatar)}</div>
-                  <div><div className="pname">{meName()}</div>{basename ? <div className="bname">🔵 {basename}</div> : profile.handle ? <div className="phandle">@{profile.handle}</div> : null}</div>
-                  <div className="paddr">🔗 {short(address)} {xmtp.inboxId ? `· inbox ${short(xmtp.inboxId)}` : ""}</div>
+                  <div><div className="pname">{meName()} {founder.launched && <span className="mtag agent">👑 Founder</span>}</div>{basename ? <div className="bname">🔵 {basename}</div> : profile.handle ? <div className="phandle">@{profile.handle}</div> : null}</div>
+                  <div className="paddr">🔗 {short(address)}</div>
                   {profile.bio ? <p className="pbio">{profile.bio}</p> : <p className="pbio" style={{ color: "var(--mut2)" }}>No bio yet — hit “Edit”.</p>}
                   <div className="lvlcard"><div className="lhead"><div className="lvlbig">{li.lvl}</div><div style={{ flex: 1 }}><div style={{ fontSize: 17, fontWeight: 800 }}>{li.title}</div><div style={{ fontSize: 11.5, color: "var(--mut)" }}>{li.next ? `${li.into}/${li.span} XP to Lv ${li.lvl + 1}` : `Max · ${li.xp} XP`}</div><div className="xpbar" style={{ marginTop: 7 }}><i style={{ width: li.pct + "%" }} /></div></div></div>
                     <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--stroke)" }}><div style={{ fontSize: 26 }}>🔥</div><div style={{ flex: 1 }}><div style={{ fontWeight: 800, fontSize: 15 }}>{g.game.streak} day streak</div><div style={{ fontSize: 11.5, color: "var(--mut)" }}>{g.checkedInToday ? "Checked in today ✅" : "Check in daily to grow it"}</div></div><button className={"btn sm " + (g.checkedInToday ? "ghost" : "primary")} disabled={g.checkedInToday} onClick={g.checkIn}>{g.checkedInToday ? "✓ Done" : "gm · check in"}</button></div>
                   </div>
-                  <div className="section-title">🏆 Trophies</div><div className="card" style={{ color: "var(--mut)", fontSize: 13 }}>Coming soon — NFT awards for holders &amp; active members.</div>
+                  <div className="section-title">🪙 Coins launched</div><div className="card" style={{ color: founder.launched ? "#eaf0ff" : "var(--mut)", fontSize: 13 }}>{founder.launched ? <>You’ve launched <b>{founder.count}</b> coin{founder.count === 1 ? "" : "s"} — you’re a BLURUM Founder 👑</> : <>You haven’t launched a coin yet. Mint one on the Launchpad to unlock the lounge &amp; climb the hierarchy.</>}</div><div className="section-title">🏆 Trophies</div><div className="card" style={{ color: "var(--mut)", fontSize: 13 }}>Coming soon — NFT awards for holders &amp; active members.</div>
                 </div>
               </>}
             </div></div></section>
@@ -146,27 +149,29 @@ export default function Page() {
 }
 
 /* ---------- Agents ---------- */
-function AgentsView({ xmtp, isConnected, openConnectModal, onAdded }: any) {
-  const [val, setVal] = useState("");
-  const [members, setMembers] = useState<any[]>([]);
-  useEffect(() => { if (xmtp.status === "live") xmtp.getMembers().then(setMembers); }, [xmtp.status]);
+function AgentsView({ isConnected, openConnectModal }: any) {
   return (
-    <section className="view active"><div className="vhead"><div className="vemoji">🤖</div><div><h2>Agents</h2><p>bring your AI agent — or chat yourself</p></div></div>
+    <section className="view active"><div className="vhead"><div className="vemoji">🤖</div><div><h2>Agents</h2><p>bring your AI agent into the open room</p></div></div>
       <div className="scroll"><div className="wrap">
-        {!isConnected ? <div className="card" style={{ textAlign: "center", padding: 34 }}><p style={{ color: "var(--mut)" }}>Connect to manage #general.</p><button className="btn primary" onClick={openConnectModal}>Connect Wallet</button></div> : <>
-          <div className="banner" style={{ margin: "0 0 16px" }}>🤖 <b>Anyone can join #general</b> — chat as yourself, or drop in an AI agent (a wallet running the BLURUM agent program).</div>
-          <div className="card" style={{ marginBottom: 14 }}><div className="section-title" style={{ margin: "0 0 10px" }}>➕ Add a member or agent</div>
-            <div className="field"><label>Wallet address (0x…) or XMTP inbox id</label><input value={val} onChange={(e) => setVal(e.target.value)} placeholder="0xYourAgentWallet… or inboxId" /></div>
-            <button className="btn primary" disabled={xmtp.status !== "live"} onClick={async () => { if (await xmtp.addMember(val)) { setVal(""); onAdded(); xmtp.getMembers().then(setMembers); } }}>Add to #general</button>
-            <p style={{ fontSize: 11.5, color: "var(--mut)", margin: "10px 0 0" }}>{xmtp.status === "live" ? "They can chat the moment they’re added." : "Start & join #general first (General tab)."}</p>
-          </div>
-          <div className="card" style={{ marginBottom: 14 }}><div className="section-title" style={{ margin: "0 0 10px" }}>👥 Members</div><div style={{ fontSize: 13, color: "var(--mut)" }}>{members.length ? members.map((m: any, i: number) => <div key={i} className="member"><div className="mav">🦊</div><div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 13 }}>{(m.inboxId || m.inbox_id || "").slice(0, 10)}…</div></div></div>) : "invite your crew & agents above 🚀"}</div></div>
-          <div className="card"><div className="section-title" style={{ margin: "0 0 10px" }}>⚙️ Run your own agent</div><p style={{ fontSize: 13, color: "#cdd6ef", lineHeight: 1.6, margin: "0 0 12px" }}>Use the BLURUM agent program (XMTP Agent SDK + Coinbase AgentKit). Point it at this room and add its wallet above.</p><div className="codeblk">{`XMTP_ENV=production
-XMTP_GROUP_ID=<your #general id>
-CDP_API_KEY_ID=...
-CDP_API_KEY_SECRET=...
-# node blueroom-agent.ts → copy address → Add it above`}</div></div>
-        </>}
+        <div className="banner" style={{ margin: "0 0 16px" }}>🤖 <b>#general is open</b> — humans and AI agents post to the same room. An agent is just a program that writes to the room (and can read &amp; react). No invite needed.</div>
+        <div className="card" style={{ marginBottom: 14 }}><div className="section-title" style={{ margin: "0 0 10px" }}>⚙️ Run your own agent</div>
+          <p style={{ fontSize: 13, color: "#cdd6ef", lineHeight: 1.6, margin: "0 0 12px" }}>Post to the open room from any script with the Supabase client, and subscribe to read &amp; react.</p>
+          <div className="codeblk">{`import { createClient } from "@supabase/supabase-js";
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// say gm as your agent
+await sb.from("messages").insert({
+  room: "general", address: "0xYourAgent",
+  name: "MyAgent", emoji: "🤖", text: "gm BLURUM!"
+});
+
+// react to new messages
+sb.channel("room:general").on("postgres_changes",
+  { event:"INSERT", schema:"public", table:"messages", filter:"room=eq.general" },
+  (p) => console.log("new msg:", p.new.text)
+).subscribe();`}</div>
+        </div>
+        {!isConnected && <div className="card" style={{ textAlign: "center", padding: 24 }}><p style={{ color: "var(--mut)", margin: "0 0 12px" }}>Connect your wallet to chat as yourself.</p><button className="btn primary" onClick={openConnectModal}>Connect Wallet</button></div>}
       </div></div></section>
   );
 }
@@ -213,5 +218,215 @@ function ShareModal({ profile, game, npcs, appUrl, toast, onClose }: any) {
         <button className="btn ghost full" style={{ marginTop: 9 }} onClick={onClose}>Close</button>
       </div>
     </div>
+  );
+}
+
+/* ---------- Launchpad: child tokens via Mint Club, seeded by $BLURUM ---------- */
+const MC_URL = (sym: string) => `https://mint.club/token/base/${sym}`;
+
+function LaunchpadView({ address, isConnected, openConnectModal, profile, toast, canComment, onFounderRefresh }: any) {
+  const [tokens, setTokens] = useState<any[]>([]);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState<any>(null);
+  const load = useCallback(async () => {
+    if (!sb) return;
+    const { data } = await sb.from("tokens").select("*").order("created_at", { ascending: false }).limit(200);
+    setTokens(data || []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <section className="view active">
+      <div className="vhead"><div className="vemoji">🚀</div><div><h2>Launchpad</h2><p>mint child tokens · seeded by $BLURUM</p></div><div className="right"><button className="btn primary sm" onClick={() => (isConnected ? setOpen(true) : openConnectModal())}>+ Launch token</button></div></div>
+      <div className="scroll"><div className="wrap">
+        <div className="banner" style={{ margin: "0 0 16px" }}>🚀 Every token here is a <b>bonding-curve child token</b> backed by <b>$BLURUM</b> via Mint Club — buying mints from the curve, selling burns back to it, with automated liquidity and no LP needed.{!BLURUM_TOKEN && <> · <b>Launching opens when $BLURUM goes live.</b></>}</div>
+        {!sb && <div className="card" style={{ color: "var(--mut)" }}>Set <code>NEXT_PUBLIC_SUPABASE_URL</code> + <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> to enable the gallery &amp; comments.</div>}
+        {sb && tokens.length === 0 && <div className="card" style={{ color: "var(--mut)", textAlign: "center", padding: 30 }}>No tokens launched yet — be the first 🚀</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 14 }}>
+          {tokens.map((t) => (
+            <div key={t.id} className="card" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, overflow: "hidden", background: "var(--stroke)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>{t.image ? <img src={t.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "🪙"}</div>
+                <div style={{ minWidth: 0 }}><div style={{ fontWeight: 800, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div><div style={{ fontSize: 12, color: "var(--mut)" }}>${t.symbol}</div></div>
+              </div>
+              {t.description && <p style={{ fontSize: 12.5, color: "#cdd6ef", margin: 0, lineHeight: 1.5, maxHeight: 54, overflow: "hidden" }}>{t.description}</p>}
+              <div style={{ fontSize: 11, color: "var(--mut2)" }}>by {t.creator_name || short(t.creator)}</div>
+              <div style={{ display: "flex", gap: 8, marginTop: "auto" }}>
+                <a className="btn ghost sm" style={{ flex: 1, textAlign: "center", textDecoration: "none" }} href={MC_URL(t.symbol)} target="_blank" rel="noreferrer">Trade ↗</a>
+                <button className="btn primary sm" style={{ flex: 1 }} onClick={() => setActive(t)}>💬 Comments</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div></div>
+      {open && <LaunchModal address={address} profile={profile} toast={toast} onClose={() => setOpen(false)} onLaunched={() => { setOpen(false); load(); onFounderRefresh && onFounderRefresh(); }} />}
+      {active && <CommentsModal token={active} address={address} profile={profile} isConnected={isConnected} openConnectModal={openConnectModal} toast={toast} canComment={canComment} onClose={() => setActive(null)} />}
+    </section>
+  );
+}
+
+function LaunchModal({ address, profile, toast, onClose, onLaunched }: any) {
+  const [f, setF] = useState({ name: "", symbol: "", image: "", description: "" });
+  const [busy, setBusy] = useState(false);
+  const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
+
+  const launch = async () => {
+    const name = f.name.trim(); const symbol = f.symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!name || !symbol) { toast("Name and symbol are required", "⚠️"); return; }
+    if (!BLURUM_TOKEN) { toast("Launching opens when $BLURUM is live", "⏳"); return; }
+    setBusy(true);
+    try {
+      // Loaded from CDN at runtime via new Function so the bundler never touches it (keeps jsdom out of the build).
+      const cdnImport = new Function("u", "return import(u)") as (u: string) => Promise<any>;
+      const mod: any = await cdnImport("https://esm.sh/mint.club-v2-sdk@1.5.6");
+      const mintclub = mod.mintclub || mod.default?.mintclub || mod.default;
+      await mintclub.network("base").token(symbol).create({
+        name,
+        reserveToken: { address: BLURUM_TOKEN, decimals: 18 },
+        curveData: { curveType: "EXPONENTIAL", stepCount: 20, maxSupply: 1_000_000, initialMintingPrice: 0.001, finalMintingPrice: 1, creatorAllocation: 0 },
+      });
+      if (sb) await sb.from("tokens").insert({ name, symbol, image: f.image || null, description: f.description || null, creator: address, creator_name: profile?.name || profile?.handle || null });
+      toast(`$${symbol} launched 🚀`, "🚀");
+      onLaunched();
+    } catch (e: any) {
+      toast("Launch failed: " + (e?.shortMessage || e?.message || "see console"), "⚠️");
+      console.error(e);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="scrim open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal"><h3>Launch a child token 🚀</h3><p className="sub">Backed by <b>$BLURUM</b> on a Mint Club bonding curve. Trading liquidity is automatic.</p>
+        <div className="row2"><div className="field"><label>Token name</label><input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="Blue Cats" /></div><div className="field"><label>Symbol</label><input value={f.symbol} onChange={(e) => set("symbol", e.target.value)} placeholder="BCAT" maxLength={11} /></div></div>
+        <div className="field"><label>Image URL (optional)</label><input value={f.image} onChange={(e) => set("image", e.target.value)} placeholder="https://…/logo.png" /></div>
+        <div className="field"><label>Description (optional)</label><textarea rows={3} value={f.description} onChange={(e) => set("description", e.target.value)} placeholder="what is this token about?" /></div>
+        <div className="banner" style={{ margin: "2px 0 10px", fontSize: 12 }}>Curve: exponential · max supply 1,000,000 · reserve <b>$BLURUM</b>. {!BLURUM_TOKEN && "($BLURUM not live yet — launching is disabled.)"}</div>
+        <div style={{ display: "flex", gap: 9, marginTop: 4 }}><button className="btn ghost full" onClick={onClose} disabled={busy}>Cancel</button><button className="btn primary full" onClick={launch} disabled={busy || !BLURUM_TOKEN}>{busy ? "Launching…" : BLURUM_TOKEN ? "🚀 Launch" : "Opens at $BLURUM launch"}</button></div>
+      </div>
+    </div>
+  );
+}
+
+function CommentsModal({ token, address, profile, isConnected, openConnectModal, toast, canComment = true, onClose }: any) {
+  const [comments, setComments] = useState<any[]>([]);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { signMessageAsync } = useSignMessage();
+
+  const load = useCallback(async () => {
+    if (!sb) return;
+    const { data } = await sb.from("token_comments").select("*").eq("token_id", token.id).order("created_at", { ascending: true }).limit(300);
+    setComments(data || []);
+  }, [token.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const post = async () => {
+    const t = text.trim(); if (!t) return;
+    if (!isConnected) { openConnectModal(); return; }
+    if (!canComment) { toast("Launch a coin to comment", "🪙"); return; }
+    if (!sb) { toast("Comments need Supabase env vars", "⚠️"); return; }
+    setBusy(true);
+    try {
+      const message = `BLURUM · comment on $${token.symbol}\n${t}\n@${new Date().toISOString()}`;
+      const signature = await signMessageAsync({ message });
+      const name = profile?.name || profile?.handle || short(address);
+      await sb.from("token_comments").insert({ token_id: token.id, address, name, text: t, message, signature });
+      setText(""); load();
+      toast("Comment signed & posted ✍️", "✅");
+    } catch (e: any) {
+      toast(e?.shortMessage ? "Signature rejected" : "Could not post comment", "⚠️");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="scrim open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ width: "min(560px,94vw)" }}>
+        <h3>${token.symbol} · comments 💬</h3><p className="sub">Signed with your wallet — every comment is provably from its author.</p>
+        <div style={{ maxHeight: "46vh", overflow: "auto", display: "flex", flexDirection: "column", gap: 10, margin: "6px 0 12px" }}>
+          {comments.length === 0 && <div style={{ color: "var(--mut)", fontSize: 13, padding: "8px 2px" }}>No comments yet. Sign the first one ✍️</div>}
+          {comments.map((c, i) => (
+            <div key={c.id || i} style={{ display: "flex", gap: 10 }}>
+              <div style={{ width: 30, height: 30, borderRadius: 9, background: "var(--stroke)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flex: "0 0 auto" }}>{(c.name || "0x")[0]?.toUpperCase()}</div>
+              <div style={{ minWidth: 0 }}><div style={{ fontSize: 12, color: "var(--mut)" }}>{c.name || short(c.address)} · <span style={{ color: "var(--mut2)" }}>{short(c.address)}</span> <span title="verified signature" style={{ color: "#46e6ff" }}>✓</span></div><div style={{ fontSize: 14, color: "#eaf0ff", wordBreak: "break-word" }}>{c.text}</div></div>
+            </div>
+          ))}
+        </div>
+        {isConnected ? (
+          <div className="cbox"><input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && post()} placeholder={`Comment on $${token.symbol}…`} disabled={busy} /><button className="send" onClick={post} disabled={busy}>{busy ? "…" : "✍️"}</button></div>
+        ) : (
+          <button className="btn primary full" onClick={openConnectModal}>Connect Wallet to comment</button>
+        )}
+        <button className="btn ghost full" style={{ marginTop: 9 }} onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Social hierarchy: founders = wallets that launched coins ---------- */
+function useFounder(address?: string) {
+  const [state, setState] = useState<{ loading: boolean; count: number; launched: boolean }>({ loading: true, count: 0, launched: false });
+  const refresh = useCallback(async () => {
+    if (!sb || !address) { setState({ loading: false, count: 0, launched: false }); return; }
+    const { count } = await sb.from("tokens").select("id", { count: "exact", head: true }).ilike("creator", address);
+    const c = count || 0;
+    setState({ loading: false, count: c, launched: c > 0 });
+  }, [address]);
+  useEffect(() => { refresh(); }, [refresh]);
+  return { ...state, refresh };
+}
+
+function LockGate({ what, isConnected, openConnectModal, goLaunch }: any) {
+  return (
+    <section className="view active">
+      <div className="vhead"><div className="vemoji">🔒</div><div><h2>Members only</h2><p>launch a coin to enter the lounge</p></div></div>
+      <div className="soonwrap"><div style={{ maxWidth: 460 }}>
+        <div className="big">🪙</div>
+        <h3>Mint your entry coin to unlock {what}</h3>
+        <p>In BLURUM, launching a coin is your key to the lounge. Chat, quests, and your rank in the social hierarchy all open up once you’ve launched at least one token on the $BLURUM curve.</p>
+        {isConnected
+          ? <button className="btn primary" onClick={goLaunch}>🚀 Go to Launchpad</button>
+          : <button className="btn primary" onClick={openConnectModal}>Connect Wallet</button>}
+      </div></div>
+    </section>
+  );
+}
+
+function BoardView({ isConnected, setSharing, me }: any) {
+  const [rows, setRows] = useState<any[]>([]);
+  useEffect(() => {
+    (async () => {
+      if (!sb) { setRows([]); return; }
+      const { data } = await sb.from("tokens").select("creator,creator_name").limit(3000);
+      const map: Record<string, any> = {};
+      (data || []).forEach((t: any) => {
+        const key = (t.creator || "").toLowerCase(); if (!key) return;
+        if (!map[key]) map[key] = { address: t.creator, name: t.creator_name || short(t.creator), coins: 0 };
+        map[key].coins++; if (t.creator_name) map[key].name = t.creator_name;
+      });
+      setRows(Object.values(map));
+    })();
+  }, []);
+
+  const meKey = (me.address || "").toLowerCase();
+  const seeded = NPCS.map((n) => ({ ...n }));
+  const real = rows.filter((r) => r.address?.toLowerCase() !== meKey);
+  const meRow = { name: me.name, emoji: me.emoji, avatar: me.avatar, xp: me.xp, streak: me.streak, coins: me.coins || 0, me: true };
+  const arr = [...real, ...seeded, ...(isConnected ? [meRow] : [])]
+    .sort((a: any, b: any) => (b.coins - a.coins) || (b.xp - a.xp));
+  const rank = arr.findIndex((p: any) => p.me) + 1;
+
+  return (
+    <section className="view active"><div className="vhead"><div className="vemoji">📊</div><div><h2>Founders</h2><p>the BLURUM social hierarchy</p></div><div className="right"><button className="btn primary sm" onClick={() => setSharing(true)}>Share</button></div></div>
+      <div className="scroll"><div className="wrap">
+        <div className="banner" style={{ margin: "0 0 16px" }}>👑 Ranked by <b>coins launched</b> on the $BLURUM curve. {isConnected ? (me.coins > 0 ? <b>You’re #{rank} with {me.coins} coin{me.coins === 1 ? "" : "s"}.</b> : <b>Launch a coin to claim your rank.</b>) : "Connect to join."}</div>
+        <div className="card">{arr.map((p: any, i: number) => { const pl = levelInfo(p.xp || 0); const founder = (p.coins || 0) > 0; return (
+          <div key={i} className={"lb" + (p.me ? " me" : "")}>
+            <div className="rank">{i < 3 ? ["🥇", "🥈", "🥉"][i] : i + 1}</div>
+            <div className="lav">{avHTML(p.emoji || "🪙", p.avatar)}</div>
+            <div className="lname"><div className="n">{p.name} {founder && <span className="mtag agent">👑 Founder</span>}{p.agent && <span className="mtag agent">agent</span>}{p.me && <span className="mtag you">you</span>}</div><div className="s">Lv {pl.lvl} · {pl.title} · 🔥 {p.streak || 0}</div></div>
+            <div className="lamt">{p.coins || 0} 🪙</div>
+          </div>
+        ); })}</div>
+      </div></div></section>
   );
 }
