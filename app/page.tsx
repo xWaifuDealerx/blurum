@@ -39,9 +39,6 @@ export default function Page() {
     }
   }, [isConnected, address]);
 
-  // Connect bonus only once a wallet has launched a coin — never on a fresh load.
-  useEffect(() => { if (canEarn) g.awardOnce("connect", 10); }, [canEarn]);
-
   // You only land on the leaderboard once you've said gm (streak > 0). Synced to Supabase.
   useEffect(() => {
     if (!sb || !isConnected || !address || !(g.game.streak > 0)) return;
@@ -59,6 +56,8 @@ export default function Page() {
   // No XP, popups, confetti or gm until a wallet has launched a coin (when the gate is on).
   const canEarn = isConnected && !locked;
   const doCheckIn = () => { if (!canEarn) { toast("Launch a coin to start earning XP", "🪙"); setView("launch"); return; } g.checkIn(); };
+  // Connect bonus only once a wallet has launched a coin — never on a fresh load. Declared after canEarn to avoid a TDZ crash.
+  useEffect(() => { if (canEarn) g.awardOnce("connect", 10); }, [canEarn]);
 
   const NAV = [
     { id: "general", ic: "💬", label: "General" }, { id: "agents", ic: "🤖", label: "Agents" }, { id: "launch", ic: "🚀", label: "Launchpad" },
