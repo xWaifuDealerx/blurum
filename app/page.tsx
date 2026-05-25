@@ -31,14 +31,16 @@ export default function Page() {
   const [sharing, setSharing] = useState(false);
 
   useEffect(() => { if (typeof window === "undefined") return; const k = "blurum:profile:" + (address || "guest"); try { const p = JSON.parse(localStorage.getItem(k) || "null"); setProfile(p ? { emoji: "🧑‍🚀", name: "", handle: "", bio: "", avatar: "", ...p } : { emoji: "🧑‍🚀", name: "", handle: "", bio: "", avatar: "" }); } catch {} }, [address]);
-  const saveProfile = (p: any) => { setProfile(p); try { localStorage.setItem("blurum:profile:" + (address || "guest"), JSON.stringify(p)); } catch {} g.awardOnce("profile", 15); };
+  const saveProfile = (p: any) => { setProfile(p); try { localStorage.setItem("blurum:profile:" + (address || "guest"), JSON.stringify(p)); } catch {} if (canEarn) g.awardOnce("profile", 15); };
 
   useEffect(() => {
     if (isConnected && address) {
-      g.awardOnce("connect", 10);
       resolveName(address).then((r) => { if (r.name) { setBasename(r.name); setProfile((p: any) => ({ ...p, name: p.name || r.name, avatar: p.avatar || r.avatar || "" })); } }).catch(() => {});
     }
   }, [isConnected, address]);
+
+  // Connect bonus only once a wallet has launched a coin — never on a fresh load.
+  useEffect(() => { if (canEarn) g.awardOnce("connect", 10); }, [canEarn]);
 
   // You only land on the leaderboard once you've said gm (streak > 0). Synced to Supabase.
   useEffect(() => {
@@ -54,6 +56,9 @@ export default function Page() {
   const li = levelInfo(g.game.xp);
   const founder = useFounder(address);
   const locked = REQUIRE_COIN && !(isConnected && founder.launched);
+  // No XP, popups, confetti or gm until a wallet has launched a coin (when the gate is on).
+  const canEarn = isConnected && !locked;
+  const doCheckIn = () => { if (!canEarn) { toast("Launch a coin to start earning XP", "🪙"); setView("launch"); return; } g.checkIn(); };
 
   const NAV = [
     { id: "general", ic: "💬", label: "General" }, { id: "agents", ic: "🤖", label: "Agents" }, { id: "launch", ic: "🚀", label: "Launchpad" },
@@ -81,7 +86,7 @@ export default function Page() {
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--mut)", marginBottom: 4 }}><span>Lv {li.lvl} · {li.title}</span><span>{li.next ? `${li.into}/${li.span} XP` : `${li.xp} XP`}</span></div>
               <div className="xpbar"><i style={{ width: li.pct + "%" }} /></div>
               <div style={{ display: "flex", gap: 8, marginTop: 11 }}>
-                <button className={"chip" + (g.checkedInToday ? "" : " cta")} style={{ flex: 1, justifyContent: "center" }} onClick={g.checkIn}>{g.checkedInToday ? `🔥 ${g.game.streak} day${g.game.streak === 1 ? "" : "s"}` : "gm · check in"}</button>
+                <button className={"chip" + (g.checkedInToday ? "" : " cta")} style={{ flex: 1, justifyContent: "center" }} onClick={doCheckIn}>{g.checkedInToday ? `🔥 ${g.game.streak} day${g.game.streak === 1 ? "" : "s"}` : "gm · check in"}</button>
                 <button className="btn ghost sm" onClick={openAccountModal}>•••</button>
               </div>
             </>
@@ -132,7 +137,7 @@ export default function Page() {
                   <div className="paddr">🔗 {short(address)}</div>
                   {profile.bio ? <p className="pbio">{profile.bio}</p> : <p className="pbio" style={{ color: "var(--mut2)" }}>No bio yet — hit “Edit”.</p>}
                   <div className="lvlcard"><div className="lhead"><div className="lvlbig">{li.lvl}</div><div style={{ flex: 1 }}><div style={{ fontSize: 17, fontWeight: 800 }}>{li.title}</div><div style={{ fontSize: 11.5, color: "var(--mut)" }}>{li.next ? `${li.into}/${li.span} XP to Lv ${li.lvl + 1}` : `Max · ${li.xp} XP`}</div><div className="xpbar" style={{ marginTop: 7 }}><i style={{ width: li.pct + "%" }} /></div></div></div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--stroke)" }}><div style={{ fontSize: 26 }}>🔥</div><div style={{ flex: 1 }}><div style={{ fontWeight: 800, fontSize: 15 }}>{g.game.streak} day streak</div><div style={{ fontSize: 11.5, color: "var(--mut)" }}>{g.checkedInToday ? "Checked in today ✅" : "Check in daily to grow it"}</div></div><button className={"btn sm " + (g.checkedInToday ? "ghost" : "primary")} disabled={g.checkedInToday} onClick={g.checkIn}>{g.checkedInToday ? "✓ Done" : "gm · check in"}</button></div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--stroke)" }}><div style={{ fontSize: 26 }}>🔥</div><div style={{ flex: 1 }}><div style={{ fontWeight: 800, fontSize: 15 }}>{g.game.streak} day streak</div><div style={{ fontSize: 11.5, color: "var(--mut)" }}>{g.checkedInToday ? "Checked in today ✅" : "Check in daily to grow it"}</div></div><button className={"btn sm " + (g.checkedInToday ? "ghost" : "primary")} disabled={g.checkedInToday} onClick={doCheckIn}>{g.checkedInToday ? "✓ Done" : "gm · check in"}</button></div>
                   </div>
                   <div className="section-title">🪙 Coins launched</div><div className="card" style={{ color: founder.launched ? "#eaf0ff" : "var(--mut)", fontSize: 13 }}>{founder.launched ? <>You’ve launched <b>{founder.count}</b> coin{founder.count === 1 ? "" : "s"} — you’re a BLURUM Founder 👑</> : <>You haven’t launched a coin yet. Mint one on the Launchpad to unlock the lounge &amp; climb the hierarchy.</>}</div><div className="section-title">🏆 Trophies</div><div className="card" style={{ color: "var(--mut)", fontSize: 13 }}>Coming soon — NFT awards for holders &amp; active members.</div>
                 </div>
