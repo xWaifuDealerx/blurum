@@ -1,8 +1,47 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useAccount } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { useChat } from "@/lib/useChat";
+import { createClient } from "@supabase/supabase-js";
+
+/* ── self-contained open #general room (Supabase Realtime) ──
+   No external lib file needed. If env vars aren't set yet, the UI
+   shows a one-time setup hint instead of crashing.                */
+const SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SB_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const ROOM = "general";
+const supabase = SB_URL && SB_KEY ? createClient(SB_URL, SB_KEY) : null;
+
+type Msg = { id: string; address?: string; name?: string; emoji?: string; text: string; created_at?: string };
+
+function useChat() {
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [status, setStatus] = useState<"unconfigured" | "connecting" | "live">(supabase ? "connecting" : "unconfigured");
+  const chanRef = useRef<any>(null);
+  useEffect(() => {
+    if (!supabase) return;
+    let active = true;
+    (async () => {
+      const { data } = await supabase.from("messages").select("*").eq("room", ROOM).order("created_at", { ascending: true }).limit(300);
+      if (!active) return;
+      setMessages((data as Msg[]) || []);
+      setStatus("live");
+      chanRef.current = supabase
+        .channel("room:" + ROOM)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: "room=eq." + ROOM }, (payload: any) => {
+          const m = payload.new as Msg;
+          setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
+        })
+        .subscribe();
+    })();
+    return () => { active = false; if (chanRef.current && supabase) supabase.removeChannel(chanRef.current); };
+  }, []);
+  const send = useCallback(async (text: string, who: { address?: string; name?: string; emoji?: string }) => {
+    if (!supabase) return;
+    await supabase.from("messages").insert({ room: ROOM, address: who.address, name: who.name, emoji: who.emoji, text });
+  }, []);
+  return { status, messages, send };
+}
 
 const AV = ["🦊","🐸","🌙","🎧","👾","🤖","🧠","🐙","🦄","🐲","🍄","⚡","🪐","🎮","🛸","🐧","🦉","🐳"];
 const avatarFor = (s: string) => { let h = 0; for (const c of s || "") h = (h * 31 + c.charCodeAt(0)) >>> 0; return AV[h % AV.length]; };
