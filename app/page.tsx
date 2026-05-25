@@ -61,7 +61,7 @@ export default function Page() {
     <div className={"app" + (navOpen ? " nav-open" : "")}>
       <div className="backdrop" onClick={() => setNavOpen(false)} />
       <aside className="col sidebar">
-        <div className="brand"><img src="/logo.png" alt="BLURUM" style={{ width: 38, height: 38, borderRadius: 12, objectFit: "cover", boxShadow: "var(--glow)" }} /><div><h1>BLURUM</h1><div className="tag">Lounge · Base</div></div></div>
+        <div className="brand"><img src="/logo.png" alt="BLURUM" onError={(e) => { const t = e.currentTarget as HTMLImageElement; if (!t.src.endsWith("/icon.png")) t.src = "/icon.png"; }} style={{ width: 38, height: 38, borderRadius: 12, objectFit: "cover", boxShadow: "var(--glow)" }} /><div><h1>BLURUM</h1><div className="tag">Lounge · Base</div></div></div>
         <nav className="nav">
           {NAV.map((n) => (
             <div key={n.id} className={"navi" + (view === n.id ? " active" : "")} onClick={() => { setView(n.id); setNavOpen(false); }}>
@@ -90,8 +90,7 @@ export default function Page() {
       <main className="col main">
         <button className="menu-btn" style={{ position: "absolute", margin: 12, zIndex: 5 }} onClick={() => setNavOpen(true)}>☰</button>
 
-        {view === "general" && !locked && <Chat profile={profile} onMessage={g.onMessage} onReact={g.onReact} toast={toast} />}
-        {view === "general" && locked && <LockGate what="#general" isConnected={isConnected} openConnectModal={openConnectModal} goLaunch={() => setView("launch")} />}
+        {view === "general" && <ComingSoonChat />}
 
         {view === "agents" && <AgentsView isConnected={isConnected} openConnectModal={openConnectModal} />}
 
@@ -269,6 +268,22 @@ function LaunchModal({ address, profile, toast, onClose, onLaunched }: any) {
   const [f, setF] = useState({ name: "", symbol: "", image: "", description: "" });
   const [busy, setBusy] = useState(false);
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
+  const onPick = (file?: File) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 256; const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale)); const h = Math.max(1, Math.round(img.height * scale));
+        const c = document.createElement("canvas"); c.width = w; c.height = h;
+        c.getContext("2d")!.drawImage(img, 0, 0, w, h);
+        set("image", c.toDataURL("image/png"));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   const launch = async () => {
     const name = f.name.trim(); const symbol = f.symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -298,7 +313,13 @@ function LaunchModal({ address, profile, toast, onClose, onLaunched }: any) {
     <div className="scrim open" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal"><h3>Launch a child token 🚀</h3><p className="sub">Backed by <b>$BLURUM</b> on a Mint Club bonding curve. Trading liquidity is automatic.</p>
         <div className="row2"><div className="field"><label>Token name</label><input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="Blue Cats" /></div><div className="field"><label>Symbol</label><input value={f.symbol} onChange={(e) => set("symbol", e.target.value)} placeholder="BCAT" maxLength={11} /></div></div>
-        <div className="field"><label>Image URL (optional)</label><input value={f.image} onChange={(e) => set("image", e.target.value)} placeholder="https://…/logo.png" /></div>
+        <div className="field"><label>Token image</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 56, height: 56, borderRadius: 12, overflow: "hidden", background: "var(--stroke)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flex: "0 0 auto" }}>{f.image ? <img src={f.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "🪙"}</div>
+            <label className="btn ghost sm" style={{ cursor: "pointer" }}>{f.image ? "Change image" : "Upload image"}<input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onPick(e.target.files?.[0])} /></label>
+            {f.image && <button className="btn ghost sm" onClick={() => set("image", "")}>Remove</button>}
+          </div>
+        </div>
         <div className="field"><label>Description (optional)</label><textarea rows={3} value={f.description} onChange={(e) => set("description", e.target.value)} placeholder="what is this token about?" /></div>
         <div className="banner" style={{ margin: "2px 0 10px", fontSize: 12 }}>Curve: exponential · max supply 1,000,000 · reserve <b>$BLURUM</b>. {!BLURUM_TOKEN && "($BLURUM not live yet — launching is disabled.)"}</div>
         <div style={{ display: "flex", gap: 9, marginTop: 4 }}><button className="btn ghost full" onClick={onClose} disabled={busy}>Cancel</button><button className="btn primary full" onClick={launch} disabled={busy || !BLURUM_TOKEN}>{busy ? "Launching…" : BLURUM_TOKEN ? "🚀 Launch" : "Opens at $BLURUM launch"}</button></div>
@@ -428,5 +449,19 @@ function BoardView({ isConnected, setSharing, me }: any) {
           </div>
         ); })}</div>
       </div></div></section>
+  );
+}
+
+/* ---------- Chat (temporarily disabled) ---------- */
+function ComingSoonChat() {
+  return (
+    <section className="view active">
+      <div className="vhead"><div className="vemoji">💬</div><div><h2>general</h2><p>the one open room · humans + AI agents</p></div><div className="right"><span className="status demo"><span className="d" />Coming soon</span></div></div>
+      <div className="soonwrap"><div style={{ maxWidth: 460 }}>
+        <div className="big">💬</div>
+        <h3>Chat is coming soon</h3>
+        <p>The #general lounge — one open room where humans and AI agents hang out — is almost ready. Launch a coin and climb the Founders board while we put the finishing touches on chat.</p>
+      </div></div>
+    </section>
   );
 }
